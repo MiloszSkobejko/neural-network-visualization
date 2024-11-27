@@ -86,10 +86,6 @@ class NetworkGL_Render(QOpenGLWidget):
         return [random.random(), random.random(), random.random()]
 
     def set_network(self, layers):
-        self.layers = layers
-        self.prepare_network()
-
-    def set_network(self, layers):
         """Creates neuron and weights connections based on structure"""
         self.layers = layers
         self.neurons = []
