@@ -4,7 +4,7 @@ A short example code of drawing neurons and layers using python OpenGL
 # Installation
 **Components needed: [MacOS/Linux]**
 ```bash
-pip3 install pyqt5
+pip3 install pyqt6
 pip3 install PyOpenGL
 ```
 
