@@ -1,58 +1,14 @@
 class Selection:
     def __init__(self, network):
+        # Rectangle selection
         self.network = network
         self.is_selecting = False
         self.selection_start = None
         self.selection_end = None
         self.selected_objects = []
-
-    def line_intersects_rect(self, line_start, line_end, rect_x_min, rect_x_max, rect_y_min, rect_y_max):
-        """Checks if a line intersects the rectangle."""
-        # Same helper functions as before
-        def on_segment(p, q, r):
-            if min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and min(p[1], r[1]) <= q[1] <= max(p[1], r[1]):
-                return True
-            return False
-
-        def orientation(p, q, r):
-            val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
-            if val == 0:
-                return 0
-            return 1 if val > 0 else 2
-
-        def do_intersect(p1, q1, p2, q2):
-            o1 = orientation(p1, q1, p2)
-            o2 = orientation(p1, q1, q2)
-            o3 = orientation(p2, q2, p1)
-            o4 = orientation(p2, q2, q1)
-
-            if o1 != o2 and o3 != o4:
-                return True
-
-            if o1 == 0 and on_segment(p1, p2, q1): return True
-            if o2 == 0 and on_segment(p1, q2, q1): return True
-            if o3 == 0 and on_segment(p2, p1, q2): return True
-            if o4 == 0 and on_segment(p2, q1, q2): return True
-
-            return False
-
-        rect_corners = [
-            (rect_x_min, rect_y_min), (rect_x_max, rect_y_min),
-            (rect_x_max, rect_y_max), (rect_x_min, rect_y_max)
-        ]
-
-        for i in range(4):
-            if do_intersect(line_start, line_end, rect_corners[i], rect_corners[(i + 1) % 4]):
-                return True
-
-        if (rect_x_min <= line_start[0] <= rect_x_max and rect_y_min <= line_start[1] <= rect_y_max and
-                rect_x_min <= line_end[0] <= rect_x_max and rect_y_min <= line_end[1] <= rect_y_max):
-            return True
-
-        return False
-
+    
     def perform_selection(self):
-        """Selects edges and neurons within the selection rectangle."""
+        """Selects weights and neruons touching selection rectangle"""
         if not self.selection_start or not self.selection_end:
             return
 
@@ -62,12 +18,62 @@ class Selection:
         x_min, x_max = sorted([x1, x2])
         y_min, y_max = sorted([y1, y2])
 
+        def line_intersects_rect(line_start, line_end, rect_x_min, rect_x_max, rect_y_min, rect_y_max):
+            """Checks if line intersect the rectangle"""
+            def on_segment(p, q, r):
+                """Checks if point q is on point p section"""
+                if min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and min(p[1], r[1]) <= q[1] <= max(p[1], r[1]):
+                    return True
+                return False
+
+            def orientation(p, q, r):
+                """Calculates orientation of 3 points, checking if they are colinear"""
+                val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+                if val == 0:
+                    return 0
+                return 1 if val > 0 else 2
+
+            def do_intersect(p1, q1, p2, q2):
+                """Checks if two lines (p1, q1) and (p2, q2) intersects"""
+                o1 = orientation(p1, q1, p2)
+                o2 = orientation(p1, q1, q2)
+                o3 = orientation(p2, q2, p1)
+                o4 = orientation(p2, q2, q1)
+
+                if o1 != o2 and o3 != o4:
+                    return True  # different orientation -> intersect
+
+                if o1 == 0 and on_segment(p1, p2, q1): return True
+                if o2 == 0 and on_segment(p1, q2, q1): return True
+                if o3 == 0 and on_segment(p2, p1, q2): return True
+                if o4 == 0 and on_segment(p2, q1, q2): return True
+
+                return False
+
+            # Selection rectangle corners
+            rect_corners = [
+                (rect_x_min, rect_y_min), (rect_x_max, rect_y_min),
+                (rect_x_max, rect_y_max), (rect_x_min, rect_y_max)
+            ]
+
+            # Checks if line intersect any side of selection rectangle 
+            for i in range(4):
+                if do_intersect(line_start, line_end, rect_corners[i], rect_corners[(i + 1) % 4]):
+                    return True
+
+            # Checks if line is inside selection rectangle
+            if (rect_x_min <= line_start[0] <= rect_x_max and rect_y_min <= line_start[1] <= rect_y_max and
+                    rect_x_min <= line_end[0] <= rect_x_max and rect_y_min <= line_end[1] <= rect_y_max):
+                return True
+
+            return False
+
         # Select lines
         for line in self.network.connections:
             start = (line.start.x, line.start.y)
             end = (line.end.x, line.end.y)
 
-            if self.line_intersects_rect(start, end, x_min, x_max, y_min, y_max):
+            if line_intersects_rect(start, end, x_min, x_max, y_min, y_max):
                 line.selected = True
             else:
                 line.selected = False
@@ -81,4 +87,4 @@ class Selection:
                     neuron.selected = False
 
         # Update edge colors in VBOs
-        self.network.update_edge_colors()
+        self.network.update_vbo()

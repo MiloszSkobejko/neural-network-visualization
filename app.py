@@ -18,7 +18,7 @@ class NetworkWindow(QMainWindow):
 
         # Below structure of the network; 3 layers 32 x 32 x 24 neurons
         # connected all together (Dense)
-        self.network_view.set_network([3,4,2])
+        self.network_view.set_network([28*28, 128, 128, 10])
 
     def keyPressEvent(self, event):
         """Zooming in / out using [+] and [-] keys"""
@@ -36,6 +36,10 @@ class NetworkWindow(QMainWindow):
         self.scale_factor /= 1.1
         self.network_view.scale_factor = self.scale_factor
         self.network_view.update()
+
+    def closeEvent(self, event):
+        self.network_view.cleanup()
+        super().closeEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
