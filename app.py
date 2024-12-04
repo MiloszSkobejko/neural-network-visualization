@@ -1,6 +1,7 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow
-from PyQt5.QtCore import Qt
+import glfw
+from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtCore import Qt
 
 from network import NetworkGL_Render
 
@@ -17,13 +18,13 @@ class NetworkWindow(QMainWindow):
 
         # Below structure of the network; 3 layers 32 x 32 x 24 neurons
         # connected all together (Dense)
-        self.network_view.set_network([32, 32, 24])
+        self.network_view.set_network([3,4,2])
 
     def keyPressEvent(self, event):
         """Zooming in / out using [+] and [-] keys"""
-        if event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
+        if event.key() == Qt.Key.Key_Plus or event.key() == Qt.Key.Key_Equal:
             self.zoom_in()
-        elif event.key() == Qt.Key_Minus:
+        elif event.key() == Qt.Key.Key_Minus:
             self.zoom_out()
 
     def zoom_in(self):
@@ -40,4 +41,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = NetworkWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

@@ -1,41 +1,13 @@
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from PyQt6.QtCore import Qt, QPoint
+from OpenGL.GL import *
+from OpenGL.arrays import vbo
 import random
 import math
-from PyQt5.QtWidgets import QOpenGLWidget
-from PyQt5.QtCore import Qt, QPoint
-from OpenGL.GL import *
+import numpy as np
 
 from selection import Selection
 
-class Edge:
-    def __init__(self, idx, n_start, n_end, color):
-        self.index = idx
-        self.start = n_start
-        self.end = n_end
-        self.color = color
-        self.selected = False
-
-    def on_screen(self, viewport):
-        """Checks if line is visible in screen"""
-        x_min, y_min, x_max, y_max = viewport
-
-        if (self.start.x < x_min and self.end.x < x_min) or \
-        (self.start.x > x_max and self.end.x > x_max):
-            return False
-        if (self.start.y < y_min and self.end.y < y_min) or \
-        (self.start.y > y_max and self.end.y > y_max):
-            return False
-
-        return True
-
-    def draw(self):
-        """Draws a line with given weight"""
-        opacity = 0.2
-        if self.selected:
-            opacity = 1.0
-
-        glColor4f(*self.color, opacity)
-        glVertex2f(self.start.x, self.start.y)
-        glVertex2f(self.end.x, self.end.y)
 
 class Neuron:
     def __init__(self, idx, x, y, color):
@@ -64,6 +36,23 @@ class Neuron:
             glVertex2f(self.x + radius * math.cos(angle), self.y + radius * math.sin(angle))
         glEnd()
 
+class Edge:
+    def __init__(self, idx, n_start, n_end, color):
+        self.index = idx
+        self.start = n_start
+        self.end = n_end
+        self.color = color
+        self.selected = False
+
+    def set_selected(self, selected):
+        """Set selection state and update color."""
+        self.selected = selected
+        # Brighten the color if selected
+        if selected:
+            self.color = [min(c + 0.5, 1.0) for c in self.color]
+        else:
+            self.color = [max(c - 0.5, 0.0) for c in self.color]
+
 class NetworkGL_Render(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -82,20 +71,21 @@ class NetworkGL_Render(QOpenGLWidget):
         self.offset_y = 0
         self.selection = Selection(self)
 
+        self.vbos = []  # List of VBOs for rendering connections
+        self.edges_by_layer = []  # Edges grouped by layer
+
     def random_color(self):
         return [random.random(), random.random(), random.random()]
 
     def set_network(self, layers):
-        self.layers = layers
-        self.prepare_network()
-
-    def set_network(self, layers):
-        """Creates neuron and weights connections based on structure"""
+        """Creates neurons and weights connections based on structure."""
         self.layers = layers
         self.neurons = []
         self.connections = []
+        self.vbos = []
+        self.edges_by_layer = []  # Reset edges by layer
 
-        # Creating neurons
+        # Create neurons
         for layer_idx, neuron_count in enumerate(self.layers):
             layer_x = self.start_x + layer_idx * self.spacing_x
             layer_neurons = []
@@ -104,81 +94,90 @@ class NetworkGL_Render(QOpenGLWidget):
                 neuron_y = self.start_y + neuron_idx * self.spacing_y
                 neuron_color = self.random_color()
 
-                neuron = Neuron([layer_idx, neuron_idx], 
-                                 layer_x, neuron_y, 
-                                 neuron_color)
+                neuron = Neuron([layer_idx, neuron_idx], layer_x, neuron_y, neuron_color)
                 layer_neurons.append(neuron)
             self.neurons.append(layer_neurons)
 
-        # Creating connections
+        # Create connections
         for i in range(len(self.neurons) - 1):
+            layer_edges = []  # Store edges for this layer
+            vbo_vertices = []
+            vbo_colors = []
+
             for start_idx, neuron_start in enumerate(self.neurons[i]):
                 for end_idx, neuron_end in enumerate(self.neurons[i + 1]):
                     connection_color = self.random_color()
-                    line = Edge([i, start_idx, end_idx], 
-                                 neuron_start, neuron_end, 
-                                 connection_color)
-                    self.connections.append(line)
+                    edge = Edge([i, start_idx, end_idx], neuron_start, neuron_end, connection_color)
+                    layer_edges.append(edge)  # Add edge to layer
+                    self.connections.append(edge)
+
+                    # Prepare VBO data
+                    vbo_vertices.extend([
+                        neuron_start.x, neuron_start.y,
+                        neuron_end.x, neuron_end.y
+                    ])
+                    vbo_colors.extend(connection_color)
+
+            self.edges_by_layer.append(layer_edges)  # Add edges of this layer
+            self.vbos.append((
+                vbo.VBO(np.array(vbo_vertices, dtype=np.float32)),
+                vbo.VBO(np.array(vbo_colors, dtype=np.float32))
+            ))
 
     def paintGL(self):
-        """Rendering using OpenGL"""
+        """Render the network using OpenGL."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
 
         glTranslatef(self.offset_x, self.offset_y, 0)
         glScalef(self.scale_factor, self.scale_factor, 1.0)
 
-        # Calculate visible area of viewport, so objects
-        # out of scene don't have to be rendered
-        w, h = self.width(), self.height()
-        x_min = -self.offset_x / self.scale_factor
-        x_max = (w - self.offset_x) / self.scale_factor
-        y_min = -self.offset_y / self.scale_factor
-        y_max = (h - self.offset_y) / self.scale_factor
-        viewport = (x_min, y_min, x_max, y_max)
+        # Rendering edges using VBOs
+        for vbo_vertices, vbo_colors in self.vbos:
+            vbo_vertices.bind()
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glVertexPointer(2, GL_FLOAT, 0, vbo_vertices)
 
-        # [OPTIMIZATION 1]
-        # Draw n-th line when zoom is far out 
-        skip_factor = max(1, int(1 / self.scale_factor))
+            vbo_colors.bind()
+            glEnableClientState(GL_COLOR_ARRAY)
+            glColorPointer(3, GL_FLOAT, 0, vbo_colors)
 
-        # Drawing lines
-        glBegin(GL_LINES)
-        for idx, line in enumerate(self.connections):
-            if idx % skip_factor == 0:
-                # [OPTIMIZATION 2]
-                # Don't draw objects when they are out
-                # of viewport.
-                if not line.on_screen(viewport):
-                    continue
-                line.draw()
-        glEnd()
+            glDrawArrays(GL_LINES, 0, len(vbo_vertices) // 2)
 
-        # Drawing neurons
+            vbo_vertices.unbind()
+            vbo_colors.unbind()
+            glDisableClientState(GL_VERTEX_ARRAY)
+            glDisableClientState(GL_COLOR_ARRAY)
+
+        # Rendering neurons
         for layer in self.neurons:
             for neuron in layer:
-                # [OPTIMIZATION 2]
-                # Don't draw objects when they are out
-                # of viewport.
-                if not neuron.on_screen(viewport):
-                    continue
-                neuron.draw()
+                if neuron.on_screen(self.viewport()):
+                    neuron.draw()
 
-        # Drawing selection rectangle
-        if self.selection.is_selecting and \
-           self.selection.selection_start and \
-           self.selection.selection_end:
-            glColor4f(1, 1, 1, 0.3)  # Transparent white
-            glBegin(GL_QUADS)
+        # Draw selection rectangle
+        if self.selection.is_selecting and self.selection.selection_start and self.selection.selection_end:
             x1, y1 = self.selection.selection_start
-            x2, y2 = self.selection.selection_end 
+            x2, y2 = self.selection.selection_end
+            glColor4f(0.2, 0.5, 1.0, 0.3)  # Semi-transparent blue
+            glBegin(GL_QUADS)
             glVertex2f(x1, y1)
             glVertex2f(x2, y1)
             glVertex2f(x2, y2)
             glVertex2f(x1, y2)
             glEnd()
 
+    def viewport(self):
+        """Returns the visible area of the viewport for optimization."""
+        w, h = self.width(), self.height()
+        x_min = -self.offset_x / self.scale_factor
+        x_max = (w - self.offset_x) / self.scale_factor
+        y_min = -self.offset_y / self.scale_factor
+        y_max = (h - self.offset_y) / self.scale_factor
+        return (x_min, y_min, x_max, y_max)
+
     def resizeGL(self, w, h):
-        """Resizing OpenGL viewport to the size of window"""
+        """Resizing OpenGL viewport to the size of window."""
         glViewport(0, 0, w, h)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
@@ -189,37 +188,55 @@ class NetworkGL_Render(QOpenGLWidget):
         """Initialization of OpenGL."""
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glEnable(GL_DEPTH_TEST)
-        glEnable(GL_BLEND)  # Włącz tryb mieszania
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)  # Ustaw funkcję mieszania
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Start dragging (panning)
             self.last_mouse_position = event.pos()
-        elif event.button() == Qt.RightButton:
-            # Start of rectangle selection
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Start rectangle selection
             self.selection.is_selecting = True
             self.selection.selection_start = self.map_to_scene(event.pos())
-            self.selection.selection_end = self.selection.selection_start
+            self.selection.selection_end = self.selection.selection_start  # Initialize to same point
+            self.update()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton:
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            # Handle dragging (panning)
             delta = event.pos() - self.last_mouse_position
             self.offset_x += delta.x()
             self.offset_y += delta.y()
             self.last_mouse_position = event.pos()
             self.update()
-        elif self.selection.is_selecting and event.buttons() == Qt.RightButton:
+        elif self.selection.is_selecting and event.buttons() == Qt.MouseButton.RightButton:
             # Update selection rectangle
             self.selection.selection_end = self.map_to_scene(event.pos())
             self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.RightButton and self.selection.is_selecting:
+        if event.button() == Qt.MouseButton.RightButton and self.selection.is_selecting:
+            # Complete selection
             self.selection.is_selecting = False
             self.selection.perform_selection()
             self.selection.selection_start = None
             self.selection.selection_end = None
             self.update()
+            
+    def update_edge_colors(self):
+        """Update the colors of edges in the VBOs based on selection."""
+        for (vbo_vertices, vbo_colors), layer_edges in zip(self.vbos, self.edges_by_layer):
+            new_colors = []
+            for edge in layer_edges:
+                opacity = 1.0 if edge.selected else 0.2
+                new_colors.extend([*edge.color, opacity])
+                new_colors.extend([*edge.color, opacity])
+
+            # Update VBO with new colors
+            vbo_colors.set_array(np.array(new_colors, dtype=np.float32))
+            vbo_colors.bind()
+
 
     def map_to_scene(self, pos):
         """Maps a screen position to the scene coordinates considering transformations."""
