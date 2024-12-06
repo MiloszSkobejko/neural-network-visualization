@@ -15,10 +15,10 @@ class NetworkWindow(QMainWindow):
         self.setCentralWidget(self.network_view)
 
         self.scale_factor = 1.0
-
+        self.network = [28 * 28, 128, 128, 10]
         # Below structure of the network; 3 layers 32 x 32 x 24 neurons
         # connected all together (Dense)
-        self.network_view.set_network([28*28, 128, 128, 10])
+        self.network_view.set_network(self.network)
 
     def keyPressEvent(self, event):
         """Zooming in / out using [+] and [-] keys"""
@@ -26,6 +26,17 @@ class NetworkWindow(QMainWindow):
             self.zoom_in()
         elif event.key() == Qt.Key.Key_Minus:
             self.zoom_out()
+
+        """Redrawing the network using [R] key"""
+        if event.key() == Qt.Key.Key_R:
+            self.network_view.cleanup()
+            self.network_view.set_network(self.network)
+            self.network_view.update()
+
+        """Deselecting all connections using [D] key"""
+        if event.key() == Qt.Key.Key_D:
+            self.network_view.selection.deselect_all()
+            self.network_view.update()
 
     def zoom_in(self):
         self.scale_factor *= 1.1

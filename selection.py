@@ -1,3 +1,5 @@
+import numpy as np
+
 class Selection:
     def __init__(self, network):
         # Rectangle selection
@@ -5,7 +7,8 @@ class Selection:
         self.is_selecting = False
         self.selection_start = None
         self.selection_end = None
-        self.selected_objects = []
+        self.selected_opacity = 1.0
+        self.unselected_opacity = 0.2
     
     def perform_selection(self):
         """Selects weights and neruons touching selection rectangle"""
@@ -69,14 +72,38 @@ class Selection:
             return False
 
         # Select lines
-        for line in self.network.connections:
-            start = (line.start.x, line.start.y)
-            end = (line.end.x, line.end.y)
+        vbo_index = 0
+        for layer_idx, layer in enumerate(self.network.connections):
 
-            if line_intersects_rect(start, end, x_min, x_max, y_min, y_max):
-                line.selected = True
-            else:
-                line.selected = False
+            # For optimization purposes, check position of selection rectangle,
+            # if it's out of layer spacing/bounds, skip this layer
+            layer_x_min = self.network.start_x + layer_idx * self.network.spacing_x
+            layer_x_max = layer_x_min + self.network.spacing_x
+
+            # Skip the layer if it doesn't intersect with the selection rectangle
+            if x_max < layer_x_min or x_min > layer_x_max:
+                vbo_index += len(layer)
+                continue
+
+            for layer_connections in layer:
+
+                # This is handler to vbo, since it's not possible to modify one line 
+                # separatetly, wole np array needs to accesed and modified.
+                current_vbo = self.network.vbos[vbo_index][1]
+                new_layer_color_array = np.array(current_vbo, dtype=np.float32)
+
+                for line_idx, line in enumerate(layer_connections):
+                    start = (line.start.x, line.start.y)
+                    end = (line.end.x, line.end.y)
+
+                    if line_intersects_rect(start, end, x_min, x_max, y_min, y_max):
+                        line.selected = True
+                        new_layer_color_array[line_idx * 4 * 2 + 3] = self.selected_opacity
+                        new_layer_color_array[line_idx * 4 * 2 + 7] = self.selected_opacity
+
+                current_vbo.set_array(new_layer_color_array)
+                current_vbo.bind()
+                vbo_index += 1
 
         # Select neurons
         for layer in self.network.neurons:
@@ -86,5 +113,22 @@ class Selection:
                 else:
                     neuron.selected = False
 
-        # Update edge colors in VBOs
-        self.network.update_vbo()
+    def deselect_all(self):
+        for layer in self.network.neurons:
+            for neuron in layer:
+                neuron.selected = False
+
+        vbo_index = 0
+        for layer in self.network.connections:
+            for layer_connections in layer:
+
+                current_vbo = self.network.vbos[vbo_index][1]
+                new_layer_color_array = np.array(current_vbo, dtype=np.float32)
+
+                for line_idx, line in enumerate(layer_connections):
+                    line.selected = False
+                    new_layer_color_array[line_idx * 4 * 2 + 3] = self.unselected_opacity
+                    new_layer_color_array[line_idx * 4 * 2 + 7] = self.unselected_opacity
+                current_vbo.set_array(new_layer_color_array)
+                current_vbo.bind()
+                vbo_index += 1

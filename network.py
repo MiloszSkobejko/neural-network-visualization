@@ -37,21 +37,13 @@ class Neuron:
         glEnd()
 
 class Edge:
-    def __init__(self, idx, n_start, n_end, color):
+    def __init__(self, idx, n_start, n_end, color, weight):
         self.index = idx
         self.start = n_start
         self.end = n_end
+        self.weight = weight
         self.color = color
         self.selected = False
-
-    def set_selected(self, selected):
-        """Set selection state and update color."""
-        self.selected = selected
-        # Brighten the color if selected
-        if selected:
-            self.color = [min(c + 0.5, 1.0) for c in self.color]
-        else:
-            self.color = [max(c - 0.5, 0.0) for c in self.color]
 
 class NetworkGL_Render(QOpenGLWidget):
     def __init__(self, parent=None):
@@ -61,7 +53,7 @@ class NetworkGL_Render(QOpenGLWidget):
         self.connections = []
         self.scale_factor = 1.0
 
-        self.spacing_x = 1000  # Distance between layers
+        self.spacing_x = 300  # Distance between layers
         self.spacing_y = 50   # Distance between neurons
         self.start_x = 50     # x draw starting value
         self.start_y = 150    # y draw starting value
@@ -77,7 +69,7 @@ class NetworkGL_Render(QOpenGLWidget):
         r = random.random()
         g = random.random()
         b = random.random()
-        opacity = 1.0
+        opacity = 0.3
         return [r,g,b,opacity]
 
     def random_color(self):
@@ -88,6 +80,7 @@ class NetworkGL_Render(QOpenGLWidget):
         self.layers = layers
         self.neurons = []
         self.connections = []
+        self.vbo_layer = []
         self.vbos = []
 
         # Creating neurons
@@ -104,7 +97,44 @@ class NetworkGL_Render(QOpenGLWidget):
             self.neurons.append(layer_neurons)
 
         # Creating connections
-        self.update_vbo(create=True)
+        for layer_idx, _ in enumerate(self.layers[:-1]):  # Stop at second-to-last layer
+            layer_connections = []
+            for start_idx, neuron_start in enumerate(self.neurons[layer_idx]):  # Current layer neurons
+                neuron_connections = []
+                vertices = []
+                colors = []
+
+                for end_idx, neuron_end in enumerate(self.neurons[layer_idx + 1]):  # Next layer neurons
+                    # Create a new Edge object with initial color and opacity
+
+                    # This approach works, but when handling opacity it's maybe better to 
+                    # reduce opacity for out of threshold connections to 0. See if it reduces 
+                    # the lag that's created by setting network again.
+                    
+                    # weight = random.random() * 10
+                    # if weight > 5:
+                    connection_color = self.random_color_weight()
+
+                    edge = Edge([layer_idx, start_idx, end_idx], neuron_start, neuron_end, connection_color, 10.0)
+                    neuron_connections.append(edge)
+
+                    vertices.extend([edge.start.x, edge.start.y, edge.end.x, edge.end.y])
+                    colors.extend(edge.color * 2)
+                    
+
+                # Store all connection coming out from neuron
+                layer_connections.append(neuron_connections)
+
+                # Create VBOs for all lines originating from this neuron
+                if vertices:
+                    vertex_array = np.array(vertices, dtype=np.float32)
+                    color_array = np.array(colors, dtype=np.float32)
+
+                    vbo_vertices = vbo.VBO(vertex_array)
+                    vbo_colors = vbo.VBO(color_array)
+                    self.vbos.append((vbo_vertices, vbo_colors))
+            #self.vbos.append(self.vbo_layer)
+            self.connections.append(layer_connections)
 
     def paintGL(self):
         """Render the network using OpenGL."""
@@ -206,49 +236,21 @@ class NetworkGL_Render(QOpenGLWidget):
             self.selection.selection_end = None
             self.update()
 
-    def update_vbo(self, create=False):
-        print("Updating VBOs")
-        for i in range(len(self.neurons) - 1):
-            vertices = []
-            colors = []
-            for start_idx, neuron_start in enumerate(self.neurons[i]):
-                for end_idx, neuron_end in enumerate(self.neurons[i + 1]):
+    def update_vbo(self):
+        """
+        This is helper function showing how to access and modify single element from vbo 
+        data array. 
+        """
+        vbo_index = 0
+        for layer in self.connections:
+            for layer_connections in layer:
 
-                    if create:
-                        # Create a new Edge object with initial color and opacity
-                        connection_color = self.random_color_weight()
-                        edge = Edge([i, start_idx, end_idx], neuron_start, neuron_end, connection_color)
-                        self.connections.append(edge)
-                    else:
-                        edge_index = sum(len(self.neurons[j]) * len(self.neurons[j + 1]) for j in range(i)) + \
-                                    (start_idx * len(self.neurons[i + 1]) + end_idx)
-                        edge = self.connections[edge_index]
+                current_vbo = self.vbos[vbo_index][1]
+                modify_layer_color_array = np.array(current_vbo, dtype=np.float32)
 
-                    r, g, b, _ = edge.color
-                    if not create and edge.selected:
-                        opacity = 1.0
-                    else:
-                        opacity = 0.2
-                    edge.color = [r, g, b, opacity]
+                for line_idx, line in enumerate(layer_connections):
+                    print(line)
 
-                    vertices.extend([edge.start.x, edge.start.y, edge.end.x, edge.end.y])
-                    colors.extend(edge.color * 2)
-
-            # Convert to numpy arrays for VBOs
-            vertex_array = np.array(vertices, dtype=np.float32)
-            color_array = np.array(colors, dtype=np.float32)
-
-            if create:
-                # Create and store VBOs
-                vbo_vertices = vbo.VBO(vertex_array)
-                vbo_colors = vbo.VBO(color_array)
-                self.vbos.append((vbo_vertices, vbo_colors))
-            else:
-                # Update existing VBOs
-                vbo_vertices, vbo_colors = self.vbos[i]
-                vbo_colors.set_array(np.array(color_array, dtype=np.float32))
-                vbo_colors.bind()
-                
     def cleanup(self):
         for vbo_vertices, vbo_colors in self.vbos:
             vbo_vertices.delete()
